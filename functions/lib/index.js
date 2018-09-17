@@ -182,7 +182,7 @@ exports.confirmTempBooking = functions.https.onRequest((req, res) => {
         res.status(401).send("Not Authorized!");
     }
     const { bookingId } = req.body;
-    console.log("delete", bookingId);
+    console.log("confirm", bookingId);
     const docRef = db.collection("bookings").doc(bookingId);
     docRef
         .update({
