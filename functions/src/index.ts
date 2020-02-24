@@ -48,25 +48,26 @@ const checkIfSlotIsAvailable = ({
         querySnapshot.forEach(function(doc) {
           console.log(doc.id, " => ", doc.data());
 
-          const exitingBooking = doc.data();
+          const existingBooking = doc.data();
 
           const existingBookingStartTime = moment(
-            exitingBooking.startTime,
+            existingBooking.startTime,
             "HH:mm"
           );
           const existingBookingEndTime = moment(
-            exitingBooking.endTime,
+            existingBooking.endTime,
             "HH:mm"
           );
           console.log(
             "compare",
             startTime,
             endTime,
-            exitingBooking.startTime,
-            exitingBooking.endTime
+            existingBooking.startTime,
+            existingBooking.endTime
           );
           if (
             doc.id !== bookingId &&
+            existingBooking.isConfirmed &&
             !(
               existingBookingEndTime.isSameOrBefore(newBookingStartTime) ||
               existingBookingStartTime.isSameOrAfter(newBookingEndTime)

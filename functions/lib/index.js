@@ -63,58 +63,51 @@ const checkIfSlotIsAvailable = ({ startTime, endTime, bookingDate, bookingId }) 
         console.log("Error getting documents: ", error);
     });
 });
-const addBooking = (bookingBody, res) => {
-    console.log(bookingBody);
-    const { name, email, phoneNumber = "not provided", bookingDate, startTime, endTime, message = "", price = "0", currency = "GBP", method = "unknown", isConfirmed } = bookingBody;
-    checkIfSlotIsAvailable({
+const checkIfSlotsAreAvailable = slotsToCheck => Promise.all(slotsToCheck.map(slotToCheck => checkIfSlotIsAvailable(slotToCheck)));
+const addBooking = bookingObject => {
+    console.log(bookingObject);
+    const { name, email, phoneNumber = "not provided", bookingDate, startTime, endTime, message = "", price = "0", currency = "GBP", method = "unknown", isConfirmed } = bookingObject;
+    const bookingCreationTime = Date.now();
+    const adjustName = name.replace(/\s+/g, "-").toLowerCase();
+    const bookingId = `${bookingCreationTime}-${adjustName}`;
+    const docRef = db.collection("bookings").doc(bookingId);
+    return docRef
+        .set({
+        name,
+        email,
+        phoneNumber,
+        bookingDate,
         startTime,
         endTime,
-        bookingDate,
-        bookingId: undefined
-    }).then(() => {
-        const bookingCreationTime = Date.now();
-        const adjustName = name.replace(/\s+/g, "-").toLowerCase();
-        const bookingId = `${bookingCreationTime}-${adjustName}`;
-        const docRef = db.collection("bookings").doc(bookingId);
-        docRef
-            .set({
-            name,
-            email,
-            phoneNumber,
-            bookingDate,
-            startTime,
-            endTime,
-            message,
-            price,
-            currency,
-            method,
-            isConfirmed,
-            bookingCreationTime
-        })
-            .then(ref => {
-            console.log("Added document with ID: ", bookingId, ref);
-            res.status(200).send({ bookingId, bookingCreationTime });
-            !isConfirmed &&
-                setTimeout(() => {
-                    docRef.get().then(doc => {
-                        if (doc.exists) {
-                            console.log("Document data:", doc.data());
-                            const data = doc.data();
-                            if (!data.isConfirmed) {
-                                docRef.delete();
-                            }
+        message,
+        price,
+        currency,
+        method,
+        isConfirmed,
+        bookingCreationTime
+    })
+        .then(() => {
+        console.log("Added document with ID: ", bookingId);
+        !isConfirmed &&
+            setTimeout(() => {
+                docRef.get().then(doc => {
+                    if (doc.exists) {
+                        console.log("Document data:", doc.data());
+                        const data = doc.data();
+                        if (!data.isConfirmed) {
+                            docRef.delete();
                         }
-                        else {
-                            console.log("No such document!");
-                        }
-                    });
-                }, 600000);
-        });
-    }, err => {
-        console.log(err);
-        res.status(401).send(err);
+                    }
+                    else {
+                        console.log("No such document!");
+                    }
+                });
+            }, 600000);
+        console.info("track", bookingId);
+        return { bookingId, bookingCreationTime };
     });
 };
+const addBookings = bookingObjects => checkIfSlotsAreAvailable(bookingObjects).then(() => Promise.all(bookingObjects.map(bookingObject => addBooking(bookingObject))));
 const editBooking = (bookingBody, res) => {
     console.log(bookingBody);
     const { bookingId } = bookingBody, bookingObject = __rest(bookingBody, ["bookingId"]);
@@ -137,7 +130,18 @@ exports.createAdminBooking = functions.https.onRequest((req, res) => {
     const _a = req.body, { token } = _a, bookingObject = __rest(_a, ["token"]);
     checkIfAdmin(token).then(() => {
         console.log("allowed");
-        addBooking(bookingObject, res);
+        return checkIfSlotIsAvailable(Object.assign({}, bookingObject, { bookingId: undefined })).then(() => {
+            addBooking(bookingObject).then(response => {
+                console.log("we got", response);
+                res.status(200).send(response);
+            }, err => {
+                console.log(err);
+                res.status(401).send(err);
+            });
+        }, err => {
+            console.log(err);
+            res.status(401).send(err);
+        });
     }, () => {
         res.status(403).send("You are not an admin");
     });
@@ -154,43 +158,59 @@ exports.editAdminBooking = functions.https.onRequest((req, res) => {
         res.status(403).send("You are not an admin");
     });
 });
-exports.createNewBooking = functions.https.onRequest((req, res) => {
-    console.log("create mew", req.body);
+exports.createNewBookings = functions.https.onRequest((req, res) => {
+    console.log("create new", req.body);
     if (req.headers.key !== key) {
         res.status(401).send("Not Authorized!");
     }
     if (req.method !== "POST") {
         res.status(403).send("Forbidden!");
     }
-    const bookingObject = req.body;
-    addBooking(bookingObject, res);
-});
-exports.deleteTempBooking = functions.https.onRequest((req, res) => {
-    if (req.headers.key !== key) {
-        res.status(401).send("Not Authorized!");
-    }
-    const { bookingId } = req.body;
-    console.log("delete", bookingId);
-    const docRef = db.collection("bookings").doc(bookingId);
-    docRef.delete().then(ref => {
-        console.log("Removed document");
-        res.status(200).send("temporary booking removed");
+    const _a = req.body, { selectedSlots } = _a, bookingInfo = __rest(_a, ["selectedSlots"]);
+    const bookingObjects = selectedSlots.map(slot => {
+        return Object.assign({}, slot, bookingInfo);
+    });
+    addBookings(bookingObjects).then(response => {
+        console.log("we got", response);
+        res.status(200).send(response);
+    }, err => {
+        console.log(err);
+        res.status(401).send(err);
     });
 });
-exports.confirmTempBooking = functions.https.onRequest((req, res) => {
+const deleteTempBooking = bookingId => {
+    const docRef = db.collection("bookings").doc(bookingId);
+    return docRef.delete();
+};
+exports.deleteTempBookings = functions.https.onRequest((req, res) => {
     if (req.headers.key !== key) {
         res.status(401).send("Not Authorized!");
     }
-    const { bookingId } = req.body;
-    console.log("confirm", bookingId);
+    const { bookingIds } = req.body;
+    console.log("delete", bookingIds);
+    Promise.all(bookingIds.map(bookingId => deleteTempBooking(bookingId))).then(() => {
+        res.status(200).send("deleted bookings");
+    }, err => {
+        console.log(err);
+    });
+});
+const confirmTempBooking = bookingId => {
     const docRef = db.collection("bookings").doc(bookingId);
-    docRef
-        .update({
+    return docRef.update({
         isConfirmed: true
-    })
-        .then(ref => {
-        console.log("Confirmed document");
+    });
+};
+exports.confirmTempBookings = functions.https.onRequest((req, res) => {
+    if (req.headers.key !== key) {
+        res.status(401).send("Not Authorized!");
+    }
+    const { bookingIds } = req.body;
+    console.log("confirm", bookingIds);
+    Promise.all(bookingIds.map(bookingId => confirmTempBooking(bookingId))).then(() => {
         res.status(200).send("confirmed booking");
+    }, err => {
+        console.log(err);
+        res.status(401).send(err);
     });
 });
 //# sourceMappingURL=index.js.map
